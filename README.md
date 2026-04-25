@@ -50,15 +50,13 @@ There are **no uptime promises and no fix-time SLAs**. I'll patch breakage when 
 
 ## Install
 
-> Until the first PyPI release, install from the GitHub repo:
-
 ```bash
-pipx install git+ssh://git@github.com/mcinteerj/woolies-nz-cli.git
-# or, if you prefer HTTPS:
-pipx install git+https://github.com/mcinteerj/woolies-nz-cli.git
+pipx install woolies-nz-cli
+# or with uv:
+uv tool install woolies-nz-cli
 ```
 
-Don't have `pipx`? See [pipx install instructions](https://pipx.pypa.io/stable/installation/), or use plain `pip install` into a venv.
+Don't have `pipx` or `uv`? See [pipx install](https://pipx.pypa.io/stable/installation/) or [uv install](https://docs.astral.sh/uv/getting-started/installation/), or use plain `pip install` into a venv.
 
 Requires **Python 3.11+**. Tested on macOS (Apple Silicon) and Linux. Windows untested.
 
