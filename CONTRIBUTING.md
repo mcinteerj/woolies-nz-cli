@@ -21,6 +21,8 @@ export WOOLWORTHS_PASSWORD="..."
 
 ## Most likely things to break
 
+This is screen-scraping plus undocumented-API-calling. There is no SLA. Selector tweaks and API payload changes are the bread and butter of breakage here — and your selector-fix PR is a genuine contribution. Don't worry about scope.
+
 Woolworths updates their site regularly. The two failure modes:
 
 ### 1. Login selectors change (`src/woolies_cli/browser.py`)

@@ -12,8 +12,15 @@ from . import __version__
 from .banner import maybe_show_banner
 from .browser import AuthError, BrowserSession
 from .client import WoolworthsClient
-from .config import ConfigError, load_credentials
-from .paths import config_dir, config_file, state_dir
+from .config import (
+    ConfigError,
+    credentials_source,
+    load_credentials,
+    loose_permissions_warning,
+    remove_credentials,
+    save_credentials,
+)
+from .paths import config_dir, config_file, cookies_file, state_dir, storage_file
 
 signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 
@@ -108,20 +115,18 @@ def main(ctx, no_input, quiet, debug):
     USAGE
       woolies <command> [options] <args>
 
-    EXAMPLES
+    GETTING STARTED
+      woolies login           # one-off interactive login
       woolies search "milk"
-      woolies cart add 123456 1
-      woolies cart list --json
-      woolies doctor
-
-    CONFIGURATION
-      Set WOOLWORTHS_USERNAME and WOOLWORTHS_PASSWORD environment variables,
-      or create a config file at ~/.config/woolies-nz-cli/config.toml.
+      woolies cart list
 
     NOT AFFILIATED with Woolworths Limited or Woolworths NZ Limited.
     Use at your own risk.
     """
     maybe_show_banner()
+    warning = loose_permissions_warning()
+    if warning:
+        click.secho(f"⚠ {warning}", fg="yellow", err=True)
     ctx.ensure_object(dict)
     ctx.obj.update(
         {
@@ -631,37 +636,133 @@ def inspect(ctx):
 
 
 @main.command()
+@click.option("--email", help="Skip the email prompt (still prompts for password).")
+@click.pass_context
+def login(ctx, email: str):
+    """Log in to Woolworths NZ and save credentials.
+
+    Prompts for email + password, runs the browser login (~25s), then saves
+    credentials to ~/.config/woolies-nz-cli/config.toml with mode 0600.
+
+    First run also downloads the Camoufox browser (~300MB).
+
+    Example:
+        woolies login
+    """
+    click.echo("Log in to Woolworths NZ.\n")
+
+    try:
+        if not email:
+            email = click.prompt("Email", type=str)
+        password = click.prompt("Password", hide_input=True, type=str)
+    except click.Abort:
+        click.echo("\nCancelled.", err=True)
+        sys.exit(130)
+
+    if not email.strip() or not password:
+        click.echo("Email and password are required.", err=True)
+        sys.exit(1)
+
+    click.echo(
+        "\nLogging in via browser (this takes ~25s, plus a one-time "
+        "~300MB Camoufox download on first run)...",
+        err=True,
+    )
+
+    async def _do_login() -> None:
+        session = BrowserSession(headless=True)
+        async with session as page:
+            await session.login(page, credentials=(email, password))
+            await page.goto("https://www.woolworths.co.nz")
+            await page.wait_for_timeout(2000)
+
+    try:
+        asyncio.run(_do_login())
+    except AuthError as e:
+        click.echo(f"\nLogin failed: {e}", err=True)
+        if ctx.obj.get("debug"):
+            raise
+        sys.exit(1)
+    except Exception as e:
+        if ctx.obj.get("debug"):
+            raise
+        click.echo(f"\nLogin error: {e}", err=True)
+        sys.exit(1)
+
+    cfg_path = save_credentials(email, password)
+
+    click.secho(f"\n✓ Logged in as {email}", fg="green")
+    click.echo(f"  Credentials saved: {cfg_path} (mode 0600)")
+    click.echo("  Cookies cached. Try: woolies search milk")
+
+
+@main.command()
+def logout():
+    """Remove cached credentials and cookies.
+
+    Clears:
+    - Saved username/password from ~/.config/woolies-nz-cli/config.toml
+    - Cookies + storage from ~/.local/state/woolies-nz-cli/
+    """
+    cleared = []
+
+    if remove_credentials():
+        cleared.append("credentials")
+
+    cookies = cookies_file()
+    if cookies.exists():
+        cookies.unlink()
+        cleared.append("cookies")
+
+    storage = storage_file()
+    if storage.exists():
+        storage.unlink()
+
+    if cleared:
+        click.secho(f"✓ Removed: {', '.join(cleared)}", fg="green")
+    else:
+        click.echo("Nothing to remove.")
+
+
+@main.command()
 @click.pass_context
 def doctor(ctx):
     """Diagnose installation and configuration."""
     ok = True
 
-    # Credentials
+    # Credentials + source
+    source = credentials_source()
     try:
         username, _ = load_credentials()
-        click.secho(f"✓ Credentials found ({username})", fg="green")
+        click.secho(
+            f"✓ Credentials found ({username}) from {source}",
+            fg="green",
+        )
     except ConfigError as e:
         click.secho("✗ Credentials not found", fg="red")
         click.echo(f"  {e}")
         ok = False
 
+    # File permissions warning
+    warning = loose_permissions_warning()
+    if warning:
+        click.secho(f"⚠ {warning}", fg="yellow")
+
     # Directories
     for label, path in [("State dir", state_dir()), ("Config dir", config_dir())]:
         try:
             path.mkdir(parents=True, exist_ok=True)
-            writable = "writable" if path.exists() else "not writable"
-            click.secho(f"✓ {label}: {path} ({writable})", fg="green")
+            click.secho(f"✓ {label}: {path}", fg="green")
         except OSError as e:
             click.secho(f"✗ {label}: {path}", fg="red")
             click.echo(f"  {e}")
             ok = False
 
-    # Optional config file
-    cfg = config_file()
-    if cfg.exists():
-        click.secho(f"✓ Config file present: {cfg}", fg="green")
+    # Cookie cache
+    if cookies_file().exists():
+        click.secho(f"✓ Cookies cached: {cookies_file()}", fg="green")
     else:
-        click.echo(f"  (no config file at {cfg} — using env vars)")
+        click.echo(f"  (no cached cookies — first command will trigger login)")
 
     # Camoufox importable
     try:

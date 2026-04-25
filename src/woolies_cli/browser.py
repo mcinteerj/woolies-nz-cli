@@ -88,12 +88,20 @@ class BrowserSession:
         except Exception:
             return True
 
-    async def login(self, page) -> None:
-        """Perform 2-step login flow."""
-        try:
-            email, password = load_credentials()
-        except ConfigError as e:
-            raise AuthError(str(e)) from e
+    async def login(
+        self, page, credentials: Optional[tuple[str, str]] = None
+    ) -> None:
+        """Perform 2-step login flow.
+
+        If credentials is None, resolves via load_credentials() (env / config.toml).
+        """
+        if credentials is None:
+            try:
+                email, password = load_credentials()
+            except ConfigError as e:
+                raise AuthError(str(e)) from e
+        else:
+            email, password = credentials
 
         await page.goto("https://www.woolworths.co.nz")
         await page.wait_for_timeout(2000)
