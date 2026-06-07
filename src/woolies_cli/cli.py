@@ -12,6 +12,7 @@ from . import __version__
 from .banner import maybe_show_banner
 from .browser import AuthError, BrowserSession
 from .client import WoolworthsClient
+from .http_client import CookieExpiredError
 from .config import (
     ConfigError,
     credentials_source,
@@ -688,6 +689,28 @@ def login(ctx, email: str):
             raise
         click.echo(f"\nLogin error: {e}", err=True)
         sys.exit(1)
+
+    # Verify the saved session actually authenticates against an account-scoped
+    # endpoint, rather than trusting that the browser flow "didn't error".
+    async def _verify() -> None:
+        client = WoolworthsClient()
+        await client.http_client.get("/api/v1/trolleys/my", retry_500=False)
+
+    try:
+        asyncio.run(_verify())
+    except CookieExpiredError:
+        click.echo(
+            "\nLogin failed: credentials were not accepted (the saved session "
+            "is not authenticated). Double-check your email and password.",
+            err=True,
+        )
+        if ctx.obj.get("debug"):
+            raise
+        sys.exit(1)
+    except Exception:
+        # Don't block login on a flaky/offline verification call; the browser
+        # flow already succeeded at this point.
+        pass
 
     cfg_path = save_credentials(email, password)
 

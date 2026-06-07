@@ -74,7 +74,10 @@ class HTTPClient:
     ) -> Dict[str, Any]:
         """Handle response and provide clean error messages."""
         if response.status_code in [401, 403]:
-            raise CookieExpiredError("Authentication failed - cookies expired")
+            raise CookieExpiredError(
+                "Not authenticated - the saved session is not logged in or has "
+                "expired. Run `woolies login` (and check your email/password)."
+            )
 
         try:
             response.raise_for_status()

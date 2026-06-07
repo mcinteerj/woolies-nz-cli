@@ -157,9 +157,51 @@ class BrowserSession:
         try:
             await page.wait_for_url("https://www.woolworths.co.nz/**", timeout=15000)
         except Exception:
-            pass
+            # The redirect to the shop never happened. We are almost certainly
+            # still on the auth0 login pages (e.g. wrong password). Surface the
+            # real reason instead of silently continuing with an unauthenticated
+            # session that later fails on account-scoped API calls.
+            if "auth.woolworths.co.nz" in page.url or "/login" in page.url:
+                error_text = await self._read_login_error(page)
+                if error_text:
+                    raise AuthError(f"Login rejected: {error_text}")
+                raise AuthError(
+                    "Login did not complete — still on the authentication page "
+                    f"({page.url}). Check your email and password."
+                )
 
         await page.wait_for_timeout(2000)
+
+    async def _read_login_error(self, page) -> Optional[str]:
+        """Return the visible auth0 login error message, if any."""
+        selectors = [
+            'span[role="alert"]',
+            '[id*="error"]',
+            '[class*="error"]',
+            '[data-error-code]',
+        ]
+        for sel in selectors:
+            try:
+                el = await page.query_selector(sel)
+                if el and await el.is_visible():
+                    text = (await el.inner_text()).strip()
+                    if text:
+                        return text
+            except Exception:
+                continue
+
+        try:
+            body = await page.inner_text("body")
+        except Exception:
+            return None
+        for phrase in (
+            "Wrong email or password",
+            "Your account has been blocked",
+            "too many",
+        ):
+            if phrase.lower() in body.lower():
+                return phrase
+        return None
 
     async def ensure_logged_in(self, page) -> None:
         """Ensure logged in, auto-login if needed."""
